@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Chess Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        h2 {
+            line-height:1.2;
+            padding-bottom: 5px;
+        }
+        .heatmap text {
+            font-size: 10px;
+            fill: black;
+        }
+        .axis text {
+            font-size: 12px;
+        }
+        .button-container {
+            margin-top: 5px;
+            margin-bottom: 15px;
+        }
+        .button-container button, .button-container input {
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+        .chart-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .chart {
+            width: 45%;
+        }
+        .chart-title {
+            margin-bottom: 20px;
+        }
+
+        .opening-name {
+            display: flex;
+            justify-content: center;
+            align-items: center; 
+        }
+
+        .arc {
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .arc:hover path {
+            fill: blue;
+        }
+        .grach-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .graph {
+            width: 800px;
+            height: 500px;
+        }
+        .bar {
+            fill: steelblue;
+        }
+        .bar:hover {
+            fill: orange;
+        }
+        .line {
+            fill: none;
+            stroke: steelblue;
+            stroke-width: 2px;
+        }
+
+    </style>
+</head>
+<body>
+    <h2>Chess board Visualization</h2>
+    <div class="button-container" id="button-container"></div>
+    <div id="heatmap"></div>
+    <h2>Chess Opening Visualization</h2>
+    <div class="chart-container">
+        <div class="chart" id="first-move-chart"></div>
+        <div class="chart" id="second-move-chart"></div>
+    </div>
+    <div class="opening-name" id="opening"></div>
+    <h2>Chess Game Length Visualization</h2>
+    <div class="graph-button-container" id="graph-button-container"></div>
+    <div class="graph-container">
+        <div class="graph" id="graph"></div> 
+    </div>
+    
+
+    <script type="text/javascript">
+        let csvUrl = 'https://media.githubusercontent.com/media/JangMinGeun/chess_visualization/main/lichess-08-2014.csv';
+
+        async function loadData() {
+            try {
+                let response = await fetch(csvUrl);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                let csvText = await response.text();
+                globalData = d3.csvParse(csvText);
+                processchessboard(globalData);
+                processpiechart(globalData);
+                processgraph(globalData);
+            } catch (error) {
+                console.error('Error loading the CSV file:', error);
+            }
+        }
+
+        function processchessboard(data) {
+            let pieceProb = {};
+            let castleProb = {};
+            let pieces = ['P', 'B', 'N', 'R', 'Q', 'K'];
+            let pieceNames = { 'P': 'Pawn', 'B': 'Bishop', 'N': 'Knight', 'R': 'Rook', 'Q': 'Queen', 'K': 'King' };
+            let files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+            let colors = ['white', 'black'];
+            let ratings = ['0+', '1000+', '1500+', '2000+'];
+
+
+            let initialPositions = {
+                white: {
+                    P: ['a2', 'b2', 'c2', 'd2', 'e2', 'f2', 'g2', 'h2'],
+                    R: ['a1', 'h1'],
+                    N: ['b1', 'g1'],
+                    B: ['c1', 'f1'],
+                    Q: ['d1'],
+                    K: ['e1']
+                },
+                black: {
+                    P: ['a7', 'b7', 'c7', 'd7', 'e7', 'f7', 'g7', 'h7'],
+                    R: ['a8', 'h8'],
+                    N: ['b8', 'g8'],
+                    B: ['c8', 'f8'],
+                    Q: ['d8'],
+                    K: ['e8']
+                }
+            };
+
+            ratings.forEach(rating => {
+                pieceProb[rating] = {};
+                castleProb[rating] = { white: { K: {}, R: {} }, black: { K: {}, R: {} } };
+                colors.forEach(color => {
+                    pieceProb[rating][color] = {};
+                    pieces.forEach(piece => {
+                        pieceProb[rating][color][piece] = {};
+                        files.forEach(file => {
+                            for (let rank = 1; rank <= 8; rank++) {
+                                pieceProb[rating][color][piece][`${file}${rank}`] = 0;
+                            }
+                        });
+                        if (initialPositions[color][piece]) {
+                            initialPositions[color][piece].forEach(pos => {
+                                pieceProb[rating][color][piece][pos] = 1;
+                            });
+                        }
+                    });
+                });
+            });
+
+            data.forEach(game => {
+                let avgrating = +game['Average Rating'];
+                let moves = game.PGN.split(' ').map(move => move.replace('/[+#x]/g',''));
+                let rating = '0+';
+                if (avgrating > 2000){
+                    rating = '2000+' ; 
+                } else if (avgrating > 1500){
+                    rating = '1500+';
+
+                } else if (avgrating > 1000){
+                    rating = '1000+';
+
+                } else {
+                    rating = '0+';
+                }
+
+                moves.forEach((move, index) => {
+                    let color = index % 3 === 2 ? 'black' : 'white';
+                    let piece = pieces.includes(move[0]) ? move[0] : 'P';
+                    //castling
+                    if (move === 'O-O'){
+                        if (color === 'white'){
+                            castleProb[rating][color]['K']['g1'] = (castleProb[rating][color]['K']['g1'] || 0) + 1;
+                            castleProb[rating][color]['R']['f1'] = (castleProb[rating][color]['R']['f1'] || 0) + 1;
+                        } else { // color black
+                            castleProb[rating][color]['K']['g8'] = (castleProb[rating][color]['K']['g8'] || 0) + 1;
+                            castleProb[rating][color]['R']['f8'] = (castleProb[rating][color]['R']['f8'] || 0) + 1;
+                        }
+                    } else if (move === 'O-O-O'){
+                        if (color === 'white'){
+                            castleProb[rating][color]['K']['c1'] = (castleProb[rating][color]['K']['c1'] || 0) + 1;
+                            castleProb[rating][color]['R']['d1'] = (castleProb[rating][color]['R']['d1'] || 0) + 1;
+                        } else { // color black
+                            castleProb[rating][color]['K']['c8'] = (castleProb[rating][color]['K']['c8'] || 0) + 1;
+                            castleProb[rating][color]['R']['d8'] = (castleProb[rating][color]['R']['d8'] || 0) + 1;
+                        }
+                    }
+                    let square = move.slice(-2);
+                    if (pieceProb[rating][color][piece][square] !== undefined) {
+                        pieceProb[rating][color][piece][square]++;
+                    }
+                });
+            });
+            createButtonsAndCheckboxes(pieceProb, castleProb, ratings, pieceNames);
+            visualizeChessBoard(pieceProb['0+']['white']['P'], 'White Pawn');
+        }
+
+        function createButtonsAndCheckboxes(pieceProb, castleProb, ratings, pieceNames) {
+            let buttonContainer = d3.select("#button-container");
+            buttonContainer.html(''); // Clear existing buttons and checkboxes
+
+            buttonContainer.append("input", ":first-child")
+                .attr("type", "checkbox")
+                .attr("id", "include-castling")
+                .property("checked", true);
+            
+            buttonContainer.append("label", ":first-child")
+                .attr("for", "include-castling")
+                .text("Include Castling")
+                .style('font-weight', 'bold');
+            
+            buttonContainer.append("br");
+
+            
+
+            buttonContainer.append("input")
+                .attr("type", "checkbox")
+                .attr("id", `white-checkbox`)
+                .property("checked", true);
+            buttonContainer.append("label")
+                .attr("for", `white-checkbox`)
+                .text('White');
+
+            buttonContainer.append("input")
+                .attr("type", "checkbox")
+                .attr("id", `black-checkbox`)
+                .property("checked", false);
+            buttonContainer.append("label")
+                .attr("for", `black-checkbox`)
+                .text('Black');
+
+            Object.keys(pieceNames).forEach(piece => {
+                buttonContainer.append("button")
+                    .text(pieceNames[piece])
+                    .on("click", () => {
+                        let selectedRatings = getSelectedRatings();
+                        let selectedColors = getSelectedColors();
+                        let selectedCastle = d3.select('#include-castling').property("checked");
+                        
+                        visualizeSelectedData(pieceProb, castleProb, piece, pieceNames[piece], selectedRatings, selectedColors, selectedCastle);
+                    });
+            });
+
+            Object.keys(ratings).forEach((rating, index) => {
+                
+                let checkbox = buttonContainer.append("input")
+                    .attr("type", "checkbox")
+                    .property("checked", false)
+                    .attr("id", `checkbox${index}`);
+                
+                if (index === 0) {
+                    checkbox.property("checked", true);
+                }
+                buttonContainer.append("label")
+                    .attr("for", `checkbox${index}`)
+                    .text(ratings[rating]);
+            });
+
+            
+        }
+
+        function getSelectedRatings() {
+            let Checked0 = d3.select('#checkbox0').property("checked");
+            let Checked1 = d3.select('#checkbox1').property("checked");
+            let Checked2 = d3.select('#checkbox2').property("checked");
+            let Checked3 = d3.select('#checkbox3').property("checked");
+
+            let selectedRatings = [];
+            if (Checked0) selectedRatings.push('0+');
+            if (Checked1) selectedRatings.push('1000+');
+            if (Checked2) selectedRatings.push('1500+');
+            if (Checked3) selectedRatings.push('2000+');
+
+            return selectedRatings;
+        }
+
+        function getSelectedColors() {
+            let whiteChecked = d3.select('#white-checkbox').property("checked");
+            let blackChecked = d3.select('#black-checkbox').property("checked");
+
+            let selectedColors = [];
+            if (whiteChecked) selectedColors.push('white');
+            if (blackChecked) selectedColors.push('black');
+
+            return selectedColors;
+        }
+
+        function visualizeSelectedData(pieceProb, castleProb, piece, pieceName, selectedRatings, selectedColors, selectedCastle) {
+            let combinedProb = {};
+            for (let rating of selectedRatings) {
+                for (let color of selectedColors) {
+                    for (let key in pieceProb[rating][color][piece]) {
+                        if (combinedProb[key]) {
+                            combinedProb[key] += pieceProb[rating][color][piece][key];
+                        } else {
+                            combinedProb[key] = pieceProb[rating][color][piece][key];
+                        }
+                        if (selectedCastle && castleProb[rating][color][piece] && castleProb[rating][color][piece][key]) {
+                            combinedProb[key] += castleProb[rating][color][piece][key];
+                        }
+                    }
+                }
+            }
+            visualizeChessBoard(combinedProb, `${selectedColors.map(color => color.charAt(0).toUpperCase() + color.slice(1)).join(" & ")} ${pieceName}`);
+        }
+
+        
+
+        function visualizeChessBoard(probData, pieceName) {
+
+            let totalMoves = Object.values(probData).reduce((acc, val) => acc + val, 0);
+            Object.keys(probData).forEach(key => {
+                probData[key] = probData[key] / totalMoves;
+            });
+
+            d3.select("#heatmap").html("");
+
+            let margin = { top: 50, right: 100, bottom: 50, left: 50 };
+            let width = 900 - margin.left - margin.right;
+            let height = 900 - margin.top - margin.bottom;
+
+            let svg = d3.select("#heatmap")
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            let x = d3.scaleBand()
+                .range([0, width])
+                .domain(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'])
+                .padding(0.01);
+
+            let y = d3.scaleBand()
+                .range([height, 0])
+                .domain(['1', '2', '3', '4', '5', '6', '7', '8'])
+                .padding(0.01);
+
+            let color = d3.scaleSequential()
+                .interpolator(d3.interpolateYlOrRd)
+                .domain([0, d3.max(Object.values(probData))]);
+
+            svg.append("g")
+                .attr("transform", `translate(0,${height})`)
+                .call(d3.axisBottom(x))
+                .attr("class", "axis");
+
+            svg.append("g")
+                .call(d3.axisLeft(y))
+                .attr("class", "axis");
+
+            svg.selectAll()
+                .data(Object.entries(probData), d => d[0])
+                .enter()
+                .append("rect")
+                .attr("x", d => x(d[0][0]))
+                .attr("y", d => y(d[0][1]))
+                .attr("width", x.bandwidth())
+                .attr("height", y.bandwidth())
+                .style("fill", d => color(d[1]));
+
+            svg.selectAll()
+                .data(Object.entries(probData), d => d[0])
+                .enter()
+                .append("text")
+                .attr("x", d => x(d[0][0]) + x.bandwidth() / 2)
+                .attr("y", d => y(d[0][1]) + y.bandwidth() / 2)
+                .attr("text-anchor", "middle")
+                .attr("alignment-baseline", "central")
+                .text(d => (d[1] * 100).toFixed(3) + "%");
+
+            svg.append("text")
+                .attr("x", width / 2)
+                .attr("y", -20)
+                .attr("text-anchor", "middle")
+                .style("font-size", "24px")
+                .style('font-weight', 'bold')
+                .text(`Probability of ${pieceName} Moving to Square on Chessboard`);
+
+            let legendMargin = { top: 10, right: 10, bottom: 10, left: 10 };
+            let legendWidth = 15;
+            let legendHeight = height;
+
+            let legendSvg = svg.append("g")
+                .attr("transform", `translate(${width + 20},0)`); 
+
+            let legendScale = d3.scaleLinear()
+                .domain([0, d3.max(Object.values(probData))])
+                .range([legendHeight, 0]);
+
+            let legendAxis = d3.axisRight(legendScale)
+                .ticks(6)
+                .tickFormat(d => (d * 100).toFixed(3) + "%");
+
+            let defs = legendSvg.append("defs");
+
+            let linearGradient = defs.append("linearGradient")
+                .attr("id", "linear-gradient")
+                .attr("x1", "0%")
+                .attr("y1", "100%")
+                .attr("x2", "0%")
+                .attr("y2", "0%");
+
+            linearGradient.selectAll("stop")
+                .data([
+                    { offset: "0%", color: color(0) },
+                    { offset: "100%", color: color(d3.max(Object.values(probData))) }
+                ])
+                .enter().append("stop")
+                .attr("offset", d => d.offset)
+                .attr("stop-color", d => d.color);
+
+            legendSvg.append("rect")
+                .attr("width", legendWidth)
+                .attr("height", legendHeight)
+                .style("fill", "url(#linear-gradient)");
+
+            legendSvg.append("g")
+                .attr("transform", `translate(${legendWidth}, 0)`)
+                .call(legendAxis)
+                .attr("class", "axis");
+
+            legendSvg.append("text")
+                .attr("x", legendWidth / 2)
+                .attr("y", -10)
+                .attr("text-anchor", "middle")
+                .style("font-size", "12px")
+                .text("Proportion");
+        }
+        
+        //visualize piechart
+
+        function processpiechart(data){
+            let moveCount = {};
+
+            data.forEach(game => {
+                let moves = game.PGN.split(' ');
+                let firstMove = moves[1].replace(/[+#x]/g, '');
+                let secondMove = moves[2] ? moves[2] : 'none';
+                if (!moveCount[firstMove]) {
+                    moveCount[firstMove] = {total:0, secondMoves: {}};
+                } 
+
+                moveCount[firstMove].total++;
+                if (moveCount[firstMove].secondMoves[secondMove]) {
+                    moveCount[firstMove].secondMoves[secondMove]++;
+                } else {
+                    moveCount[firstMove].secondMoves[secondMove] = 1;
+                }
+            });
+
+            let firstMoveData = Object.entries(moveCount).map(([move, countData]) => ({ move, count: countData.total }));
+            firstMoveData.sort((a, b) => b.count - a.count);
+
+            let top5 = firstMoveData.slice(0,5);
+            let others = firstMoveData.slice(5).reduce((acc, cur) => acc + cur.count, 0);
+            top5.push({move:'else', count:others});
+
+            window.moveCount = moveCount;
+
+            createPieChart(top5, 'First Move Distribution', '#first-move-chart', handleFirstMoveClick);
+
+            
+        }
+
+        function handleFirstMoveClick(d) {
+            processSecondMoves(d.data.move);
+        }
+
+        function processSecondMoves(firstMove) {
+            let secondMoveData = Object.entries(window.moveCount[firstMove].secondMoves).map(([move, count]) => ({ move, count }));
+            secondMoveData.sort((a, b) => b.count - a.count);
+
+            let top5 = secondMoveData.slice(0,5);
+            let others = secondMoveData.slice(5).reduce((acc, cur) => acc + cur.count, 0);
+            top5.push({move:'else', count:others});
+            window.firstmove = firstMove;
+
+            createPieChart(top5, `Second Move Distribution after ${firstMove}`, '#second-move-chart', handleSecondMoveClick);
+        }
+
+        function handleSecondMoveClick(d) {
+            openingname(window.firstmove, d.data.move);
+
+        }
+
+        function openingname(firstMove, secondMove){
+            let openingName = 'Unknown Opening';
+            
+            let openings = {
+                'e4': {
+                    'e5': 'Ruy Lopez',
+                    'c5': 'Sicilian Defence',
+                    'e6': 'French Defence',
+                    'd5': 'Scandinavian Defence',
+                    'c6': 'Caro-Kann Defence',   
+
+                },
+                'd4': {
+                    'd5': 'Closed Game',
+                    'Nf6': 'Indian Game',
+                    'e6': 'Franco-Indian Defence',
+                    'g6': 'Modern Defence',
+                    'd6': 'Pirc Defence',
+                },
+                'Nf3': {
+                    'd5': 'Zukertort opening with d5',
+                    'e6':'Zukertort opening with e6',
+                    'Nf6':'Zukertort opening with Nf6',
+                    'c5':'Zukertort opening with c5',
+                    'd6':'Zukertort opening with d6',
+                },
+                'e3': {
+                    'e5': 'Van\'t Kruijs opening with e5',
+                    'd5':'Van\'t Kruijs opening with d5',
+                    'e6':'Van\'t Kruijs opening with e6',
+                    'c5':'Van\'t Kruijs opening with c5',
+                    'g6':'Van\'t Kruijs opening with g6',
+                },
+                'c4': {
+                    'e5': 'English Opening with e5',
+                    'Nf6':'English Opening with Nf6',
+                    'e6': 'English Opening with e6',
+                    'c5': 'English Opening with c5',
+                    'd5': 'English Opening with d5',
+                }
+
+            };
+
+            if (openings[firstMove][secondMove]){
+                openingName = openings[firstMove][secondMove];
+            }
+            d3.select('#opening-name').remove(); 
+            d3.select('#opening').append('text')
+                .attr('x', 0)
+                .attr('y', 550/2 + 25)
+                .attr('id', 'opening-name')
+                .style('font-weight', 'bold')
+                .style('color', 'red')
+                .style('font-size','24px')
+                .attr('text-anchor', 'middle')
+                .text(`Opening Name: ${openingName}`);
+        }
+
+        function createPieChart(data, title, elementId, clickHandler) {
+            let margin = { top: 50, right: 50, bottom: 50, left: 50 };
+            
+            let width = 550 - margin.right - margin.left;
+            let height = 550 - margin.top - margin.bottom;
+            let radius = Math.min(width, height) / 2;
+
+            d3.select(elementId).html('');
+
+            let svg = d3.select(elementId)
+                .append('svg')
+                .attr('width', width + margin.left + margin.right)
+                .attr('height', height + margin.top + margin.bottom)
+                .append('g')
+                .attr('transform', `translate(${width / 2 + margin.left}, ${height / 2 + margin.top})`);
+
+            let color = d3.scaleOrdinal(d3.schemeCategory10);
+
+            let pie = d3.pie()
+                .value(d => d.count)
+                .sort(null);
+
+            let path = d3.arc()
+                .outerRadius(radius - 10)
+                .innerRadius(0);
+
+            let label = d3.arc()
+                .outerRadius(radius)
+                .innerRadius(radius - 80);
+
+            let arc = svg.selectAll('.arc')
+                .data(pie(data))
+                .enter()
+                .append('g')
+                .attr('class', 'arc')
+                .on('click', (event,d) => clickHandler(d));
+
+            arc.append('path')
+                .attr('d', path)
+                .attr('fill', d => color(d.data.move));
+
+            arc.append('text')
+                .attr('transform', d => `translate(${label.centroid(d)})`)
+                .attr('dy', '0.35em')
+                .text(d => d.data.move);
+
+            arc.append('text')
+                .attr('transform', d => `translate(${path.centroid(d)})`)
+                .attr('dy', '0.35em')
+                .attr('text-anchor', 'middle')
+                .style('font-size', '15px')
+                .style('color', 'black')
+                .text(d => {
+                    let total = d3.sum(data.map(d => d.count));
+                    let percent = (d.data.count / total * 100).toFixed(1);
+                    return `${percent}%`;
+                });
+
+            svg.append('text')
+                .attr('x', 0)
+                .attr('y', 0 - (height / 2) - margin.top / 2)
+                .attr('text-anchor', 'middle')
+                .style('font-size', '24px')
+                .style('font-weight', 'bold')
+                .text(title);
+        }
+
+         //visualize barchart
+        function processgraph(data){
+            let TerminationType = ['Normal', 'Time forfeit'];
+            let GameType = ['Bullet', 'Blitz', 'Correspondence', 'Classical'];
+            let Ratings = ['0+', '1000+', '1500+', '2000+'];
+
+            let datafilter = {'TerminationType':{}, 'GameType':{}, 'Ratings':{}};
+
+            TerminationType.forEach(type => {
+                datafilter['TerminationType'][type] = {'moves':{}};
+            });
+
+            GameType.forEach(type => {
+                datafilter['GameType'][type] = {'moves':{}};
+            });
+
+            Ratings.forEach(rating => {
+                datafilter['Ratings'][rating] = {'moves':{}};
+            });
+
+            data.forEach(game => {
+                let moves = game.PGN.split(' ');
+                let totalMoves = Math.ceil(moves.length / 3);
+                let terminate = game['Termination Type']; 
+                let mode = game['Mode'];
+                let avgrating = +game['Average Rating'];
+
+                let rating = '0+';
+                if (avgrating > 2000){
+                    rating = '2000+' ; 
+                } else if (avgrating > 1500){
+                    rating = '1500+';
+
+                } else if (avgrating > 1000){
+                    rating = '1000+';
+
+                } else {
+                    rating = '0+';
+                }
+
+                if (datafilter['TerminationType'][terminate]){
+                    if (datafilter['TerminationType'][terminate]['moves'][totalMoves]) {
+                            datafilter['TerminationType'][terminate]['moves'][totalMoves]++;
+                        } else {
+                            datafilter['TerminationType'][terminate]['moves'][totalMoves] = 1;
+                        }
+                }
+                if (datafilter['GameType'][mode]){
+                    if (datafilter['GameType'][mode]['moves'][totalMoves]) {
+                            datafilter['GameType'][mode]['moves'][totalMoves]++;
+                    } else {
+                            datafilter['GameType'][mode]['moves'][totalMoves] = 1;
+                    }
+                }
+                if (datafilter['Ratings'][rating]){
+                    if (datafilter['Ratings'][rating]['moves'][totalMoves]) {
+                            datafilter['Ratings'][rating]['moves'][totalMoves]++;
+                    } else {
+                            datafilter['Ratings'][rating]['moves'][totalMoves] = 1;
+                    }
+                }
+            });
+            createButtons(datafilter);
+            visualizeBarChart(datafilter['TerminationType']);
+
+        }
+
+        function createButtons(datafilter){
+            let buttonContainer = d3.select("#graph-button-container");
+
+            Object.keys(datafilter).forEach(type => {
+                buttonContainer.append("button")
+                    .text(type)
+                    .on("click", () => {
+                        visualizeBarChart(datafilter[type]);
+                    });
+            });
+
+        }
+        function kernelDensityEstimator(kernel, X) {
+                return function(V) {
+                    return X.map(function(x) {
+                        return [x, d3.mean(V, function(v) { return kernel(x - v); })];
+                    });
+                };
+            }
+
+        function kernelEpanechnikov(k) {
+            return function(v) {
+                return Math.abs(v /= k) <= 1 ? 0.75 * (1 - v * v) / k : 0;
+            };
+        }
+        
+        function visualizeBarChart(chartData){
+            let keys = Object.keys(chartData);
+            let color = d3.scaleOrdinal(d3.schemeCategory10);
+            
+            // let values = keys.map(key => {
+            //     let moves = chartData[key]['moves'];
+            //     return Object.entries(moves).map(([move, count]) => ({ move: +move, count }));
+            // }).flat();
+
+            // values.sort((a, b) => a.move - b.move);
+
+            let margin = {top: 20, right: 30, bottom: 40, left: 80};
+            let width = 800 - margin.left - margin.right;
+            let height = 500 - margin.top - margin.bottom;
+
+            let svg = d3.select("#graph").html("")
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom + margin.bottom)
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+            
+            let maxMove = 0;
+            let allValues = [];
+
+            keys.forEach((key, i) => {
+                let moves = chartData[key]['moves'];
+                let values = Object.entries(moves).map(([move, count]) => ({ move: +move, count, key }));
+                values.sort((a, b) => a.move - b.move);
+                allValues = allValues.concat(values);
+                maxMove = Math.max(maxMove, ...values.map(d => d.move));
+            });
+
+            let x = d3.scaleBand()
+                .domain(d3.range(1, maxMove + 1))
+                .range([0, width])
+                .padding(0.1);
+
+            let y = d3.scaleLinear()
+                .domain([0, d3.max(allValues, d => d.count)])
+                .nice()
+                .range([height, 0]);
+
+            svg.append("g")
+                .attr("class", "x axis")
+                .attr("transform", `translate(0,${height})`)
+                .call(d3.axisBottom(x).tickValues(x.domain().filter((d, i) => !(i % Math.ceil(maxMove / 20)))))
+                .selectAll("text")
+                .attr("transform", "translate(0,10)rotate(0)"); 
+
+
+            svg.append("g")
+                .attr("class", "y axis")
+                .call(d3.axisLeft(y));
+
+            keys.forEach((key, i) => {
+                let values = allValues.filter(d => d.key === key);
+                svg.selectAll(`.bar-${i}`)
+                    .data(values)
+                    .enter().append("rect")
+                    .attr("class", `bar-${i}`)
+                    .attr("x", d => x(d.move) + i * x.bandwidth() / keys.length)
+                    .attr("y", d => y(d.count))
+                    .attr("width", x.bandwidth() / keys.length)
+                    .attr("height", d => height - y(d.count))
+                    .attr("fill", color(i))
+                    .attr("opacity", 0.7);
+            });
+            
+            svg.append("text")
+                .attr("transform", "rotate(-90)")
+                .attr("y", 0 - margin.left)
+                .attr("x", 0 - (height / 2))
+                .attr("dy", "1em")
+                .style("text-anchor", "middle")
+                .text("Number of Games");
+
+            svg.append("text")
+                .attr("x", width / 2)
+                .attr("y", height + margin.bottom - 10)
+                .attr("dy", "1em")
+                .style("text-anchor", "middle")
+                .text("Total Moves");
+
+            let legend = svg.selectAll(".legend")
+                .data(keys)
+                .enter().append("g")
+                .attr("class", "legend")
+                .attr("transform", (d, i) => `translate(0,${i * 20})`)
+                .on("mouseover", function(event, d, i){
+                    let index = keys.indexOf(d);
+                    svg.selectAll(`.bar-${index}`)
+                        .attr("opacity", 1)
+                        .attr("stroke", "black")
+                        .attr("stroke-width", 1.5);
+                })
+                .on("mouseout", function(event,d,i){
+                    let index = keys.indexOf(d);
+                    svg.selectAll(`.bar-${index}`)
+                       .attr("opacity", 0.7)
+                       .attr("stroke", "none");
+                });
+
+            legend.append("rect")
+                .attr("x", width - 18)
+                .attr("width", 18)
+                .attr("height", 18)
+                .style("fill", (d, i) => color(i));
+
+            legend.append("text")
+                .attr("x", width - 24)
+                .attr("y", 9)
+                .attr("dy", ".35em")
+                .style("text-anchor", "end")
+                .text(d => d);
+        }
+
+        loadData();
+    </script>
+</body>
+</html>
